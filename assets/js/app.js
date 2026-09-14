@@ -54,9 +54,22 @@ document.addEventListener('DOMContentLoaded', () => {
         const message = userInput.value.trim();
         if (!message) return;
 
+        const referenceUrl = document.getElementById('referenceUrl').value.trim();
+        const uiImageInput = document.getElementById('uiImage');
+
         // Add user message to UI
-        appendMessage('user', message);
+        let userDisplayMessage = escapeHtml(message);
+        if (referenceUrl) userDisplayMessage += `<br><small><i>Ref URL: ${escapeHtml(referenceUrl)}</i></small>`;
+        if (uiImageInput.files.length) userDisplayMessage += `<br><small><i>[Image Attached]</i></small>`;
+
+        appendMessage('user', userDisplayMessage);
+
         userInput.value = '';
+        document.getElementById('referenceUrl').value = '';
+        // don't clear the image input immediately in case they want to ask follow ups, but let's clear it for UI consistency
+        const uploadedImage = uiImageInput.files[0];
+        uiImageInput.value = '';
+
         document.getElementById('sendBtn').disabled = true;
 
         // Create AI message placeholder
@@ -67,6 +80,12 @@ document.addEventListener('DOMContentLoaded', () => {
         formData.append('user_instruction', message);
         if (contextPath) {
             formData.append('context_path', contextPath);
+        }
+        if (referenceUrl) {
+            formData.append('reference_url', referenceUrl);
+        }
+        if (uploadedImage) {
+            formData.append('ui_image', uploadedImage);
         }
 
         try {
@@ -116,22 +135,37 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
+    function escapeHtml(unsafe) {
+        return unsafe
+             .replace(/&/g, "&amp;")
+             .replace(/</g, "&lt;")
+             .replace(/>/g, "&gt;")
+             .replace(/"/g, "&quot;")
+             .replace(/'/g, "&#039;");
+    }
+
     function appendMessage(sender, text, id = null) {
         const div = document.createElement('div');
         div.className = `chat-message ${sender}`;
         if (id) {
             div.id = id;
-            div.innerHTML = text; // Allow HTML for loader
-        } else {
-            div.textContent = text;
         }
 
         if(sender === 'user') {
+             // text can contain our HTML tags for images/URLs, so we need to be careful
+             // The incoming text is already built with some HTML, but the original message might have XSS.
+             // We handled the message directly earlier, but let's be safe.
+             // Actually, since we control what is passed to appendMessage('user', userDisplayMessage),
+             // and userDisplayMessage has the raw message + HTML. It's better to escape the message before building the HTML.
              div.innerHTML = `<strong>You:</strong><br>${text}`;
         } else if (sender === 'ai' && !id) {
-             div.innerHTML = `<strong>AI:</strong><br>${text}`;
+             div.innerHTML = `<strong>AI:</strong><br>${escapeHtml(text)}`;
         } else if (sender === 'system') {
-             div.innerHTML = `<strong>System:</strong> ${text}`;
+             div.innerHTML = `<strong>System:</strong> ${escapeHtml(text)}`;
+        } else if (id) {
+             div.innerHTML = text; // loader HTML
+        } else {
+             div.textContent = text;
         }
 
         chatBox.appendChild(div);

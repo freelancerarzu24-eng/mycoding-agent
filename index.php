@@ -37,9 +37,16 @@
                         </div>
                     </div>
 
-                    <form id="chatForm">
+                    <form id="chatForm" enctype="multipart/form-data">
+                        <div class="mb-2">
+                            <input type="url" id="referenceUrl" class="form-control" placeholder="Reference URL (Optional)">
+                        </div>
+                        <div class="mb-2">
+                            <input type="file" id="uiImage" class="form-control" accept="image/png, image/jpeg, image/webp" aria-label="Upload UI Design Image (Optional)">
+                            <small class="text-muted">Upload a UI design image to auto-generate code (Requires vision model like llava).</small>
+                        </div>
                         <div class="input-group">
-                            <textarea id="userInput" class="form-control" placeholder="Ask the AI to do something... e.g. 'Scan for bugs'" rows="2" required></textarea>
+                            <textarea id="userInput" class="form-control" placeholder="Ask the AI to do something... e.g. 'Build a website like this image'" rows="2" required></textarea>
                             <button class="btn btn-primary" type="submit" id="sendBtn">Send</button>
                         </div>
                     </form>
