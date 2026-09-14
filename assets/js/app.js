@@ -47,6 +47,34 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
+    // Configure marked to use highlight.js for syntax highlighting
+    if (typeof marked !== 'undefined' && typeof hljs !== 'undefined') {
+        marked.setOptions({
+            highlight: function(code, lang) {
+                const language = hljs.getLanguage(lang) ? lang : 'plaintext';
+                return hljs.highlight(code, { language }).value;
+            },
+            langPrefix: 'hljs language-'
+        });
+    }
+
+    // Auto-resize textarea
+    userInput.addEventListener('input', function() {
+        this.style.height = 'auto';
+        this.style.height = (this.scrollHeight) + 'px';
+        if(this.value === '') {
+            this.style.height = 'auto';
+        }
+    });
+
+    // Submit on Enter (Shift+Enter for new line)
+    userInput.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            chatForm.dispatchEvent(new Event('submit'));
+        }
+    });
+
     // Handle Chat
     chatForm.addEventListener('submit', async (e) => {
         e.preventDefault();
@@ -59,22 +87,25 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Add user message to UI
         let userDisplayMessage = escapeHtml(message);
-        if (referenceUrl) userDisplayMessage += `<br><small><i>Ref URL: ${escapeHtml(referenceUrl)}</i></small>`;
-        if (uiImageInput.files.length) userDisplayMessage += `<br><small><i>[Image Attached]</i></small>`;
+        if (referenceUrl) userDisplayMessage += `<br><small class="text-white-50"><i class="fa-solid fa-link"></i> ${escapeHtml(referenceUrl)}</small>`;
+        if (uiImageInput.files.length) userDisplayMessage += `<br><small class="text-white-50"><i class="fa-regular fa-image"></i> Image Attached</small>`;
 
         appendMessage('user', userDisplayMessage);
 
         userInput.value = '';
+        userInput.style.height = 'auto';
         document.getElementById('referenceUrl').value = '';
-        // don't clear the image input immediately in case they want to ask follow ups, but let's clear it for UI consistency
+
         const uploadedImage = uiImageInput.files[0];
         uiImageInput.value = '';
 
-        document.getElementById('sendBtn').disabled = true;
+        const sendBtn = document.getElementById('sendBtn');
+        sendBtn.disabled = true;
+        sendBtn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i>';
 
         // Create AI message placeholder
         const aiMessageId = 'ai-msg-' + Date.now();
-        appendMessage('ai', '<div class="loader"></div> Thinking...', aiMessageId);
+        appendMessage('ai', '<div class="loader"></div> Processing...', aiMessageId);
 
         const formData = new FormData();
         formData.append('user_instruction', message);
@@ -101,37 +132,48 @@ document.addEventListener('DOMContentLoaded', () => {
             // Stream response
             const reader = response.body.getReader();
             const decoder = new TextDecoder('utf-8');
-            const aiMessageElement = document.getElementById(aiMessageId);
-            aiMessageElement.innerHTML = ''; // clear loader
 
-            let isFirstChunk = true;
+            // Find the inner content container for the AI message
+            const aiMessageContainer = document.getElementById(aiMessageId);
+            const contentDiv = aiMessageContainer.querySelector('.message-content');
+            contentDiv.innerHTML = '';
+
+            let fullAiText = '';
 
             while (true) {
                 const { done, value } = await reader.read();
                 if (done) break;
 
                 const chunk = decoder.decode(value, { stream: true });
+                fullAiText += chunk;
 
-                // Extremely basic parsing of chunked output. In reality, Ollama sends newline separated JSONs.
-                // We will try to parse them if possible. Our backend process_chat.php handles parsing and sending raw text if done right,
-                // but let's assume the backend just streams raw text for simplicity.
-                aiMessageElement.textContent += chunk;
-
-                if (isFirstChunk) {
-                    isFirstChunk = false;
+                // Parse markdown in real-time
+                if (typeof marked !== 'undefined') {
+                    contentDiv.innerHTML = marked.parse(fullAiText);
+                } else {
+                    contentDiv.textContent = fullAiText;
                 }
 
                 chatBox.scrollTop = chatBox.scrollHeight;
             }
 
+            // Re-apply highlighting to the final block to ensure it caught everything
+            if (typeof hljs !== 'undefined') {
+                contentDiv.querySelectorAll('pre code').forEach((block) => {
+                    hljs.highlightElement(block);
+                });
+            }
+
         } catch (error) {
             console.error(error);
-            const aiMessageElement = document.getElementById(aiMessageId);
-            if(aiMessageElement) {
-                aiMessageElement.innerHTML = `<span class="text-danger">✖ Failed to get response. Is Ollama running?</span>`;
+            const aiMessageContainer = document.getElementById(aiMessageId);
+            if(aiMessageContainer) {
+                const contentDiv = aiMessageContainer.querySelector('.message-content');
+                contentDiv.innerHTML = `<span class="text-danger"><i class="fa-solid fa-circle-exclamation"></i> Failed to get response. Is Ollama running locally?</span>`;
             }
         } finally {
-            document.getElementById('sendBtn').disabled = false;
+            sendBtn.disabled = false;
+            sendBtn.innerHTML = '<i class="fa-solid fa-paper-plane"></i>';
         }
     });
 
@@ -151,23 +193,22 @@ document.addEventListener('DOMContentLoaded', () => {
             div.id = id;
         }
 
+        const contentDiv = document.createElement('div');
+        contentDiv.className = 'message-content';
+
         if(sender === 'user') {
-             // text can contain our HTML tags for images/URLs, so we need to be careful
-             // The incoming text is already built with some HTML, but the original message might have XSS.
-             // We handled the message directly earlier, but let's be safe.
-             // Actually, since we control what is passed to appendMessage('user', userDisplayMessage),
-             // and userDisplayMessage has the raw message + HTML. It's better to escape the message before building the HTML.
-             div.innerHTML = `<strong>You:</strong><br>${text}`;
+             contentDiv.innerHTML = text; // text already escaped before calling
         } else if (sender === 'ai' && !id) {
-             div.innerHTML = `<strong>AI:</strong><br>${escapeHtml(text)}`;
+             contentDiv.innerHTML = typeof marked !== 'undefined' ? marked.parse(text) : escapeHtml(text);
         } else if (sender === 'system') {
-             div.innerHTML = `<strong>System:</strong> ${escapeHtml(text)}`;
+             contentDiv.innerHTML = typeof marked !== 'undefined' ? marked.parse(text) : escapeHtml(text);
         } else if (id) {
-             div.innerHTML = text; // loader HTML
+             contentDiv.innerHTML = text; // loader HTML
         } else {
-             div.textContent = text;
+             contentDiv.textContent = text;
         }
 
+        div.appendChild(contentDiv);
         chatBox.appendChild(div);
         chatBox.scrollTop = chatBox.scrollHeight;
     }
